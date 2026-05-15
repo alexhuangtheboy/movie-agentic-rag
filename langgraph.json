@@ -1,0 +1,14 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "movie_agent_query": "rag_agent.graph:movie_agent_query_graph",
+    "movie_rag_add_data": "rag_agent.movie_agent.graphs:movie_rag_add_data_graph",
+    "movie_rag_query": "rag_agent.movie_agent.graphs:movie_rag_query_graph"
+  },
+  "http": {
+    "app": "app:app"
+  }
+}
