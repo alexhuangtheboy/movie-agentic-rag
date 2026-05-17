@@ -24,6 +24,11 @@ def initialize_tool_selection_node(state: ToolSelectionState) -> ToolSelectionSt
         "question": (state.get("question") or "").strip(),
         "sql_table_names": state.get("sql_table_names") or [],
         "graph_table_names": state.get("graph_table_names") or [],
+        "chat_history_messages": state.get("chat_history_messages") or [],
+        "user_memories_text": state.get("user_memories_text") or "",
+        "session_memories_text": state.get("session_memories_text") or "",
+        "previous_tool": state.get("previous_tool") or "",
+        "previous_answer": state.get("previous_answer") or "",
         "tool": state.get("tool") or "",
         "query": state.get("query") or "",
         "confidence": float(state.get("confidence") or 0.0),
@@ -55,7 +60,18 @@ def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
         response = llm.bind(response_format={"type": "json_object"}).invoke(
             [
                 SystemMessage(content=get_tool_selection_system_prompt()),
-                HumanMessage(content=get_tool_selection_user_prompt(sql_schema, graph_schema, question)),
+                HumanMessage(
+                    content=get_tool_selection_user_prompt(
+                        sql_schema,
+                        graph_schema,
+                        question,
+                        chat_history_messages=state.get("chat_history_messages") or [],
+                        user_memories_text=state.get("user_memories_text") or "",
+                        session_memories_text=state.get("session_memories_text") or "",
+                        previous_tool=state.get("previous_tool") or "",
+                        previous_answer=state.get("previous_answer") or "",
+                    )
+                ),
             ]
         )
         payload = json.loads(strip_code_fence(str(response.content)))

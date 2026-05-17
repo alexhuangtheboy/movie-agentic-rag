@@ -24,6 +24,12 @@ Do not choose "direct response" for movie requests such as:
 - recommendations ("movies like Interstellar", "recommend thriller movies")
 - filters ("best movies after 2015", "comedy movies by rating")
 - cast/crew lookup ("who acted in Titanic", "movies directed by Nolan")
+- context follow-ups ("give me the specific movie names", "list them", "those movies") when prior turns indicate movie retrieval intent.
+
+For vague follow-up wording, use conversation context:
+- If prior messages or memories imply an active movie retrieval task, do not choose "direct response".
+- Prefer "sql query" for prior hard-filter context (year/rating/genre/director/votes).
+- Prefer "rag" for prior semantic recommendation context.
 
 For mixed questions, prefer SQL first when there are hard filters such as year, rating, genre, director, writer, votes, or title. Vector RAG can be used later if SQL returns no results.
 
@@ -45,13 +51,38 @@ Rules:
 """
 
 
-def get_tool_selection_user_prompt(sql_schema: str, graph_schema: str, question: str) -> str:
+def get_tool_selection_user_prompt(
+    sql_schema: str,
+    graph_schema: str,
+    question: str,
+    chat_history_messages: list[str] | None = None,
+    user_memories_text: str = "",
+    session_memories_text: str = "",
+    previous_tool: str = "",
+    previous_answer: str = "",
+) -> str:
     """Return the routing user prompt."""
+    history_lines = chat_history_messages or []
+    history_block = "\n".join(f"- {item}" for item in history_lines if item) or "(none)"
+    previous_tool = previous_tool or "(unknown)"
+    previous_answer = previous_answer or "(none)"
+    user_memories_text = user_memories_text or "(none)"
+    session_memories_text = session_memories_text or "(none)"
     return f"""SQL schema:
 {sql_schema}
 
 Graph schema:
 {graph_schema}
+
+Conversation context:
+- Previous selected tool: {previous_tool}
+- Previous answer: {previous_answer}
+- Chat history:
+{history_block}
+- User memories:
+{user_memories_text}
+- Session memories:
+{session_memories_text}
 
 Question:
 {question}

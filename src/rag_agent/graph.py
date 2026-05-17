@@ -93,10 +93,16 @@ def retrieve_memories_node(state: MovieAgentState) -> MovieAgentState:
 @time_node("call_tool_selection")
 def call_tool_selection_node(state: MovieAgentState) -> MovieAgentState:
     """Route the query to SQL, graph, or vector RAG."""
+    memory_texts = format_memories_for_prompt(state)
     routing_input = {
         "question": state.get("query", ""),
         "sql_table_names": state.get("sql_table_names", MOVIE_SQL_TABLES),
         "graph_table_names": state.get("graph_table_names", MOVIE_GRAPH_SCHEMAS),
+        "chat_history_messages": state.get("chat_history_messages", []),
+        "user_memories_text": memory_texts.get("user_memories_text", ""),
+        "session_memories_text": memory_texts.get("session_memories_text", ""),
+        "previous_tool": state.get("suggested_tools", ""),
+        "previous_answer": truncate_text(state.get("answer", "")),
     }
     result = tool_selection_graph.invoke(routing_input)
     return {
