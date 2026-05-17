@@ -13,6 +13,18 @@ Choose exactly one tool:
 - "rag": semantic/narrative/movie-description search, recommendations by plot/theme/tone, or fallback when data is ambiguous.
 - "direct response": only for simple clarification or when no database lookup is needed.
 
+Choose "direct response" for examples like:
+- "what are you"
+- "what can you do"
+- "help"
+- "hello"
+- "thanks"
+
+Do not choose "direct response" for movie requests such as:
+- recommendations ("movies like Interstellar", "recommend thriller movies")
+- filters ("best movies after 2015", "comedy movies by rating")
+- cast/crew lookup ("who acted in Titanic", "movies directed by Nolan")
+
 For mixed questions, prefer SQL first when there are hard filters such as year, rating, genre, director, writer, votes, or title. Vector RAG can be used later if SQL returns no results.
 
 Return only valid JSON with this schema:

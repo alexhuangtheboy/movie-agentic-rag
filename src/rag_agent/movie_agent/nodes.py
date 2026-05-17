@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 from rag_agent.context import Context, format_memories_for_prompt
+from rag_agent.context.base import DIRECT_RESPONSE_SYSTEM_PROMPT
 from rag_agent.llm import get_chat_model
 from rag_agent.movie_agent.formatters import convert_movies_to_toon
 from rag_agent.movie_agent.states import AddDataState, QueryState
@@ -31,6 +32,14 @@ def _no_context_answer(query: str) -> str:
             "or no records are close enough to the requested themes."
         )
     return "我没有在向量数据库中找到匹配的电影剧情上下文。可能是向量表为空、已存 embedding 与当前模型不匹配，或没有足够相近的记录。"
+
+
+def _chat_history_section(state: QueryState) -> str:
+    messages = state.get("chat_history_messages") or []
+    if not messages:
+        return "No prior chat history."
+    history_lines = [f"- {message}" for message in messages if message]
+    return "\n".join(history_lines) if history_lines else "No prior chat history."
 
 
 @time_node("store_movie_embeddings")
@@ -154,3 +163,39 @@ Include movie titles and relevant evidence from context.
         return {**state, "answer": answer, "success": True, "reasoning": "Generated answer from vector context."}
     except Exception as exc:
         return {**state, "answer": f"Failed to generate answer: {exc}", "success": False, "reasoning": str(exc)}
+
+
+@time_node("generate_direct_response")
+def generate_direct_response_node(state: QueryState, runtime: Runtime[Context]) -> QueryState:
+    """Generate a direct answer without movie vector/SQL/graph retrieval context."""
+    query = state.get("query", "")
+    memory_texts = format_memories_for_prompt(state)
+    answer_language_instruction = language_instruction(query)
+    prompt = f"""{DIRECT_RESPONSE_SYSTEM_PROMPT}
+
+User memories:
+{memory_texts.get("user_memories_text", "")}
+
+Session memories:
+{memory_texts.get("session_memories_text", "")}
+
+Chat history messages:
+{_chat_history_section(state)}
+
+Question: {query}
+
+{answer_language_instruction}
+Answer naturally and briefly.
+"""
+    try:
+        llm = get_chat_model(runtime.context.model)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        answer = sanitize_answer_for_query(str(response.content), query)
+        return {
+            **state,
+            "answer": answer,
+            "success": True,
+            "reasoning": "Generated direct response without movie retrieval.",
+        }
+    except Exception as exc:
+        return {**state, "answer": f"Failed to generate direct response: {exc}", "success": False, "reasoning": str(exc)}

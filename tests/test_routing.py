@@ -13,6 +13,10 @@ def test_route_decision_rag_default():
     assert route_decision({"suggested_tools": "rag"}) == "rag_fallback"
 
 
+def test_route_decision_direct_response():
+    assert route_decision({"suggested_tools": "direct response"}) == "direct_response"
+
+
 def test_sql_refines_empty_result_under_limit():
     assert route_after_sql(
         {

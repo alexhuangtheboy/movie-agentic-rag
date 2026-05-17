@@ -6,6 +6,13 @@ from dataclasses import dataclass
 
 from rag_agent.constants import get_llm_model
 
+DIRECT_RESPONSE_SYSTEM_PROMPT = (
+    "You are a movie Agentic RAG assistant. "
+    "For general questions that do not require movie retrieval, respond directly about your role and capabilities. "
+    "Use available memory and chat history context when helpful. "
+    "Do not cite movie database records, movie IDs, SQL results, graph results, or vector chunks unless the user explicitly asks for movie-specific facts."
+)
+
 
 @dataclass
 class Context:

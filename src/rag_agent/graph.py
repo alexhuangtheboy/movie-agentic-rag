@@ -17,6 +17,7 @@ from rag_agent.llm import get_chat_model
 from rag_agent.movie_agent.nodes import (
     format_context_node,
     generate_answer_node,
+    generate_direct_response_node,
     search_vector_db_node,
     validate_query_node,
 )
@@ -272,13 +273,17 @@ Explain relationships clearly and only use facts present in the graph result.
         return {**state, "success": True, "reasoning": f"Graph result refinement failed: {exc}"}
 
 
-def route_decision(state: MovieAgentState) -> Literal["execute_sql_query", "execute_graph_query", "rag_fallback"]:
+def route_decision(
+    state: MovieAgentState,
+) -> Literal["execute_sql_query", "execute_graph_query", "direct_response", "rag_fallback"]:
     """Route after tool selection."""
     tool = (state.get("suggested_tools") or "rag").lower()
     if tool in {"sql query", "sql"}:
         return "execute_sql_query"
     if tool in {"graph query", "graph"}:
         return "execute_graph_query"
+    if tool in {"direct response", "direct_response"}:
+        return "direct_response"
     return "rag_fallback"
 
 
@@ -318,6 +323,7 @@ movie_agent_query_builder.add_node("validate_query", validate_query_node)
 movie_agent_query_builder.add_node("search_vector_db", search_vector_db_node)
 movie_agent_query_builder.add_node("format_context", format_context_node)
 movie_agent_query_builder.add_node("generate_answer", generate_answer_node)
+movie_agent_query_builder.add_node("generate_direct_response", generate_direct_response_node)
 
 movie_agent_query_builder.add_edge(START, "initialize_state")
 movie_agent_query_builder.add_edge("initialize_state", "retrieve_memories")
@@ -328,6 +334,7 @@ movie_agent_query_builder.add_conditional_edges(
     {
         "execute_sql_query": "execute_sql_query",
         "execute_graph_query": "execute_graph_query",
+        "direct_response": "generate_direct_response",
         "rag_fallback": "validate_query",
     },
 )
@@ -357,6 +364,7 @@ movie_agent_query_builder.add_edge("validate_query", "search_vector_db")
 movie_agent_query_builder.add_edge("search_vector_db", "format_context")
 movie_agent_query_builder.add_edge("format_context", "generate_answer")
 movie_agent_query_builder.add_edge("generate_answer", END)
+movie_agent_query_builder.add_edge("generate_direct_response", END)
 
 try:
     checkpointer_cm = PostgresSaver.from_conn_string(get_checkpoint_database_url())
