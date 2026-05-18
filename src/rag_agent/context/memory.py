@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -13,10 +14,21 @@ from sqlalchemy import create_engine, text
 from rag_agent.context.base import Context
 from rag_agent.database.connections import get_memory_database_url
 
+logger = logging.getLogger(__name__)
+
 
 def _memory_engine():
     timeout = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
     return create_engine(get_memory_database_url(), connect_args={"connect_timeout": timeout})
+
+
+def _memory_auto_create_tables() -> bool:
+    return os.getenv("MEMORY_AUTO_CREATE_TABLES", "false").lower() == "true"
+
+
+def _memory_max_items(kind: str) -> int:
+    env_name = "USER_MEMORY_MAX_ITEMS" if kind == "user" else "SESSION_MEMORY_MAX_ITEMS"
+    return int(os.getenv(env_name, "200" if kind == "user" else "100"))
 
 
 @dataclass
@@ -53,9 +65,30 @@ def ensure_memory_tables() -> None:
         conn.execute(text(ddl))
 
 
+def _maybe_ensure_memory_tables() -> None:
+    if _memory_auto_create_tables():
+        ensure_memory_tables()
+
+
+def _prune_memories(table: str, key: str, value: str, max_items: int) -> None:
+    """Keep only the newest max_items rows for one memory owner."""
+    if max_items <= 0:
+        return
+    engine = _memory_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"DELETE FROM {table} WHERE {key} = :value AND memory_id NOT IN ("
+                f"SELECT memory_id FROM {table} WHERE {key} = :value "
+                "ORDER BY created_at DESC LIMIT :max_items)"
+            ),
+            {"value": value, "max_items": max_items},
+        )
+
+
 def add_user_memory(user_id: str, content: str, metadata: dict[str, Any] | None = None) -> str:
     """Store one user memory and return its ID."""
-    ensure_memory_tables()
+    _maybe_ensure_memory_tables()
     memory_id = str(uuid.uuid4())
     engine = _memory_engine()
     with engine.begin() as conn:
@@ -71,12 +104,13 @@ def add_user_memory(user_id: str, content: str, metadata: dict[str, Any] | None 
                 "metadata": json.dumps(metadata or {}),
             },
         )
+    _prune_memories("user_memories", "user_id", user_id, _memory_max_items("user"))
     return memory_id
 
 
 def add_session_memory(chat_id: str, content: str, metadata: dict[str, Any] | None = None) -> str:
     """Store one session memory and return its ID."""
-    ensure_memory_tables()
+    _maybe_ensure_memory_tables()
     memory_id = str(uuid.uuid4())
     engine = _memory_engine()
     with engine.begin() as conn:
@@ -92,6 +126,7 @@ def add_session_memory(chat_id: str, content: str, metadata: dict[str, Any] | No
                 "metadata": json.dumps(metadata or {}),
             },
         )
+    _prune_memories("session_memories", "chat_id", chat_id, _memory_max_items("session"))
     return memory_id
 
 
@@ -111,7 +146,6 @@ def _fetch_memories(table: str, key: str, value: str, limit: int = 8) -> list[di
 def retrieve_memories_for_state(state: dict[str, Any]) -> dict[str, Any]:
     """Attach user and session memories to a graph state when IDs are available."""
     try:
-        ensure_memory_tables()
         updated = dict(state)
         user_id = state.get("user_id")
         chat_id = state.get("chat_id")
@@ -121,6 +155,7 @@ def retrieve_memories_for_state(state: dict[str, Any]) -> dict[str, Any]:
             updated["session_memories"] = _fetch_memories("session_memories", "chat_id", chat_id)
         return updated
     except Exception as exc:
+        logger.exception("Failed to retrieve memories")
         updated = dict(state)
         updated["memory_error"] = str(exc)
         updated.setdefault("user_memories", [])

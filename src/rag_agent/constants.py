@@ -43,7 +43,10 @@ def get_llm_endpoint() -> str:
 
 def get_llm_api_key() -> str:
     """Return configured LLM API key."""
-    return os.getenv("LLM_API_KEY", "dummy-key")
+    value = os.getenv("LLM_API_KEY")
+    if not value:
+        raise RuntimeError("LLM_API_KEY is required")
+    return value
 
 
 def get_embedding_model() -> str:
@@ -64,3 +67,22 @@ def get_embedding_api_key() -> str:
 def get_movie_vector_table() -> str:
     """Return pgvector table name for movie embeddings."""
     return os.getenv("MOVIE_VECTOR_TABLE", "movie_plot_embeddings")
+
+
+def validate_required_config() -> None:
+    """Fail fast when required runtime configuration is missing."""
+    required = [
+        "LLM_API_KEY",
+        "EMBEDDING_API_KEY",
+        "MOVIE_SQL_DATABASE_URL",
+        "MEMORY_DATABASE_URL",
+        "NEO4J_URL",
+        "NEO4J_USERNAME",
+        "NEO4J_PASSWORD",
+    ]
+    vector_url = os.getenv("MOVIE_VECTOR_DATABASE_URL")
+    if not vector_url:
+        required.extend(["MOVIE_VECTOR_DB_HOST", "MOVIE_VECTOR_DB_USER", "MOVIE_VECTOR_DB_PW"])
+    missing = [name for name in required if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(sorted(missing))}")

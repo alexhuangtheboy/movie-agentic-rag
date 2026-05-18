@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field, ValidationError
 
 from rag_agent.database.db_prompts import get_graph_schema_prompts, get_sql_schema_prompts
 from rag_agent.llm import get_chat_model
@@ -14,6 +17,17 @@ from rag_agent.tool_selection_agent.prompts import (
 )
 from rag_agent.tool_selection_agent.states import ToolSelectionState
 from rag_agent.utils import strip_code_fence, time_node
+
+logger = logging.getLogger(__name__)
+
+
+class ToolSelectionPayload(BaseModel):
+    """Validated JSON payload returned by the routing LLM."""
+
+    tool: Literal["sql query", "graph query", "rag", "direct response"] = "rag"
+    query: str = ""
+    reasoning: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 @time_node("initialize_tool_selection")
@@ -46,6 +60,22 @@ def _fallback_route(question: str) -> dict[str, object]:
     return {"tool": "rag", "query": "", "reasoning": "Semantic movie search is the safest fallback.", "confidence": 0.4}
 
 
+def _fallback_with_error(question: str, exc: Exception, raw_output: str = "") -> dict[str, object]:
+    fallback = _fallback_route(question)
+    logger.warning(
+        "Tool selection fallback. question=%r raw_output=%r fallback_tool=%r",
+        question,
+        raw_output,
+        fallback.get("tool"),
+        exc_info=True,
+    )
+    return {
+        **fallback,
+        "error": str(exc),
+        "reasoning": f"{fallback.get('reasoning')} Router fallback after error: {exc}",
+    }
+
+
 @time_node("select_tool")
 def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
     """Ask the LLM to select a retrieval tool and generate SQL/Cypher when needed."""
@@ -56,6 +86,7 @@ def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
     sql_schema = get_sql_schema_prompts(state.get("sql_table_names") or [])
     graph_schema = get_graph_schema_prompts(state.get("graph_table_names") or [])
     llm = get_chat_model()
+    raw_output = ""
     try:
         response = llm.bind(response_format={"type": "json_object"}).invoke(
             [
@@ -74,18 +105,20 @@ def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
                 ),
             ]
         )
-        payload = json.loads(strip_code_fence(str(response.content)))
-        tool = payload.get("tool") or "rag"
-        query = payload.get("query") or ""
+        raw_output = strip_code_fence(str(response.content))
+        payload = ToolSelectionPayload.model_validate(json.loads(raw_output))
+        tool = payload.tool
+        query = payload.query
         if tool in {"rag", "direct response"}:
             query = ""
         return {
             **state,
             "tool": tool,
             "query": query,
-            "reasoning": payload.get("reasoning") or "",
-            "confidence": float(payload.get("confidence") or 0.0),
+            "reasoning": payload.reasoning,
+            "confidence": payload.confidence,
         }
+    except (json.JSONDecodeError, ValidationError) as exc:
+        return {**state, **_fallback_with_error(question, exc, raw_output)}
     except Exception as exc:
-        fallback = _fallback_route(question)
-        return {**state, **fallback, "error": str(exc)}
+        return {**state, **_fallback_with_error(question, exc, raw_output)}

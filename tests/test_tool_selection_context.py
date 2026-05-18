@@ -118,3 +118,39 @@ def test_call_tool_selection_node_forwards_context_fields(monkeypatch):
     assert "prefers highly rated titles" in capture.payload["user_memories_text"]
     assert "asked for post-2010 movies" in capture.payload["session_memories_text"]
     assert capture.payload["previous_tool"] == "sql query"
+
+
+class _InvalidJsonLLM:
+    def bind(self, response_format):
+        return self
+
+    def invoke(self, messages):
+        return _FakeResponse("not-json")
+
+
+class _InvalidSchemaLLM:
+    def bind(self, response_format):
+        return self
+
+    def invoke(self, messages):
+        return _FakeResponse(json.dumps({"tool": "invalid", "confidence": 2}))
+
+
+def test_select_tool_fallback_on_invalid_json(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _InvalidJsonLLM())
+
+    result = select_tool_node({"question": "show actor relationships"})
+
+    assert result["tool"] == "graph query"
+    assert "Router fallback after error" in result["reasoning"]
+    assert result["error"]
+
+
+def test_select_tool_fallback_on_invalid_schema(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _InvalidSchemaLLM())
+
+    result = select_tool_node({"question": "give me movies about time travel"})
+
+    assert result["tool"] == "rag"
+    assert "Router fallback after error" in result["reasoning"]
+    assert result["error"]

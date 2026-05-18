@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import requests
@@ -29,8 +30,9 @@ from rag_agent.constants import (
     get_llm_endpoint,
     get_llm_model,
     get_movie_vector_table,
+    validate_required_config,
 )
-from rag_agent.context import MemoryContext
+from rag_agent.context import MemoryContext, ensure_memory_tables
 from rag_agent.database.connections import (
     get_checkpoint_database_url,
     get_movie_sql_database_url,
@@ -41,10 +43,27 @@ from rag_agent.graph import movie_agent_query_graph
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize optional runtime resources before serving requests."""
+    try:
+        validate_required_config()
+        if os.getenv("MEMORY_AUTO_CREATE_TABLES", "false").lower() == "true":
+            await asyncio.to_thread(ensure_memory_tables)
+    except Exception:
+        if os.getenv("APP_FAIL_FAST_ON_STARTUP", "false").lower() == "true":
+            logger.exception("Application startup validation failed")
+            raise
+        logger.exception("Application startup validation failed; continuing in degraded mode")
+    yield
+
+
 app = FastAPI(
     title="Movie Agentic RAG API",
     version="0.1.0",
     description="Movie backend with SQL, Vector, Graph, smart routing, self-correction, and memory.",
+    lifespan=lifespan,
 )
 
 
@@ -151,6 +170,7 @@ async def _run_dependency_check(name: str, check_func) -> tuple[str, DependencyC
             detail=detail,
         )
     except Exception as exc:
+        logger.exception("Dependency check failed: %s", name)
         return name, DependencyCheck(
             status="failed",
             latency_ms=int((time.perf_counter() - start) * 1000),

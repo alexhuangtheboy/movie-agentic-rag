@@ -12,7 +12,16 @@ def test_english_language_instruction_is_strict():
     assert "Do not answer in German" in instruction
 
 
-def test_sanitize_english_answer_to_ascii():
+def test_sanitize_english_answer_preserves_title_accents():
+    answer = "Only one movie matches \u201cAmerica\u201d: \u00bf... Y el pr\u00f3jimo?"
+
+    sanitized = sanitize_answer_for_query(answer, "Find movies with plot for america drama")
+
+    assert sanitized == 'Only one movie matches "America": ... Y el prójimo?'
+
+
+def test_sanitize_english_answer_can_force_ascii(monkeypatch):
+    monkeypatch.setenv("ASCII_SANITIZE_ANSWERS", "true")
     answer = "Only one movie matches \u201cAmerica\u201d: \u00bf... Y el pr\u00f3jimo?"
 
     sanitized = sanitize_answer_for_query(answer, "Find movies with plot for america drama")

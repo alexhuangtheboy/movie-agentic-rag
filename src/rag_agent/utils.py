@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import functools
+import logging
+import os
 import time
 import unicodedata
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
+logger = logging.getLogger(__name__)
 
 
 def time_node(name: str) -> Callable[[F], F]:
     """Log basic timing information for LangGraph nodes."""
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -21,7 +25,7 @@ def time_node(name: str) -> Callable[[F], F]:
                 return func(*args, **kwargs)
             finally:
                 elapsed = time.perf_counter() - start
-                print(f"[node:{name}] completed in {elapsed:.3f}s")
+                logger.info("Node %s completed in %.3fs", name, elapsed)
 
         return wrapper  # type: ignore[return-value]
 
@@ -50,10 +54,22 @@ def truncate_text(text: str, limit: int = 8000) -> str:
 def detect_answer_language(text: str) -> str:
     """Detect the response language for prompt control.
 
-    This intentionally keeps the heuristic simple: if the question is mostly
-    ASCII letters, force English; otherwise use Chinese for the current product
-    workflow.
+    Use langdetect when installed, and keep a deterministic heuristic fallback
+    so local/test environments do not fail if the optional detector is absent.
     """
+    stripped = text.strip()
+    if not stripped:
+        return "English"
+    try:
+        from langdetect import LangDetectException, detect
+
+        detected = detect(stripped)
+        if detected.startswith("zh"):
+            return "Chinese"
+        return "English"
+    except (ImportError, LangDetectException):
+        logger.debug("Falling back to heuristic language detection", exc_info=True)
+
     ascii_letters = sum(1 for char in text if char.isascii() and char.isalpha())
     non_ascii = sum(1 for char in text if not char.isascii() and not char.isspace())
     if ascii_letters >= max(non_ascii, 1):
@@ -75,8 +91,9 @@ def language_instruction(text: str) -> str:
 def sanitize_answer_for_query(answer: str, query: str) -> str:
     """Normalize final answers for the detected user language.
 
-    For English prompts, force plain ASCII output to avoid PowerShell mojibake
-    from curly punctuation or accented title text.
+    By default, preserve non-ASCII title text and only normalize punctuation
+    that commonly causes CLI/display issues. Set ASCII_SANITIZE_ANSWERS=true
+    to opt into legacy ASCII-only behavior.
     """
     if detect_answer_language(query) != "English":
         return answer
@@ -96,6 +113,7 @@ def sanitize_answer_for_query(answer: str, query: str) -> str:
     normalized = answer
     for source, target in replacements.items():
         normalized = normalized.replace(source, target)
-    normalized = unicodedata.normalize("NFKD", normalized)
-    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    if os.getenv("ASCII_SANITIZE_ANSWERS", "false").lower() == "true":
+        normalized = unicodedata.normalize("NFKD", normalized)
+        normalized = normalized.encode("ascii", "ignore").decode("ascii")
     return normalized

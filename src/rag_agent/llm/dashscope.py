@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from typing import List
 
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI
@@ -35,14 +34,14 @@ class DashScopeEmbeddings(Embeddings):
         self.timeout = timeout or float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout)
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of documents."""
         if not texts:
             return []
         response = self.client.embeddings.create(model=self.model, input=texts)
         return [item.embedding for item in response.data]
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         """Embed a single query."""
         response = self.client.embeddings.create(model=self.model, input=[text])
         return response.data[0].embedding

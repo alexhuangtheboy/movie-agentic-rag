@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from langchain_core.messages import HumanMessage
@@ -31,6 +32,8 @@ from rag_agent.utils import (
     time_node,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _with_defaults(state: MovieAgentState) -> MovieAgentState:
@@ -248,7 +251,13 @@ Summarize only facts present in the SQL result.
         answer = sanitize_answer_for_query(str(response.content), state.get("query", ""))
         return {**state, "answer": answer, "success": True, "reasoning": "Refined SQL result into final answer."}
     except Exception as exc:
-        return {**state, "success": True, "reasoning": f"SQL result refinement failed: {exc}"}
+        logger.exception("SQL result refinement failed")
+        return {
+            **state,
+            "answer": state.get("raw_sql_result") or state.get("answer", ""),
+            "success": False,
+            "reasoning": f"SQL result refinement failed: {exc}",
+        }
 
 
 @time_node("refine_graph_result")
@@ -276,7 +285,13 @@ Explain relationships clearly and only use facts present in the graph result.
         answer = sanitize_answer_for_query(str(response.content), state.get("query", ""))
         return {**state, "answer": answer, "success": True, "reasoning": "Refined graph result into final answer."}
     except Exception as exc:
-        return {**state, "success": True, "reasoning": f"Graph result refinement failed: {exc}"}
+        logger.exception("Graph result refinement failed")
+        return {
+            **state,
+            "answer": state.get("raw_graph_result") or state.get("answer", ""),
+            "success": False,
+            "reasoning": f"Graph result refinement failed: {exc}",
+        }
 
 
 def route_decision(
@@ -380,8 +395,8 @@ try:
         name="movie_agent_query",
         checkpointer=checkpointer,
     )
-except Exception as exc:
-    print(f"Warning: PostgresSaver unavailable, compiling without checkpointing: {exc}")
+except Exception:
+    logger.exception("PostgresSaver unavailable, compiling without checkpointing")
     movie_agent_query_graph = movie_agent_query_builder.compile(name="movie_agent_query")
 
 __all__ = ["movie_agent_query_graph"]

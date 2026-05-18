@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
@@ -9,6 +11,7 @@ from rag_agent.context import Context, format_memories_for_prompt
 from rag_agent.context.base import DIRECT_RESPONSE_SYSTEM_PROMPT
 from rag_agent.llm import get_chat_model
 from rag_agent.movie_agent.formatters import convert_movies_to_toon
+from rag_agent.movie_agent.prompts import build_direct_response_prompt, build_vector_answer_prompt
 from rag_agent.movie_agent.states import AddDataState, QueryState
 from rag_agent.movie_agent.tools import format_context_from_movies, get_movie_vector_service
 from rag_agent.utils import (
@@ -18,6 +21,8 @@ from rag_agent.utils import (
     time_node,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _looks_english(text: str) -> bool:
@@ -56,6 +61,7 @@ def store_movie_embeddings_node(state: AddDataState) -> AddDataState:
             "message": "Movie embeddings stored successfully.",
         }
     except Exception as exc:
+        logger.exception("Failed to store movie embeddings")
         return {
             **state,
             "processed_count": 0,
@@ -98,6 +104,7 @@ def search_vector_db_node(state: QueryState) -> QueryState:
             "reasoning": f"Found {len(similar_movies)} semantically similar movie chunks.",
         }
     except Exception as exc:
+        logger.exception("Vector search failed")
         return {
             **state,
             "similar_movies": [],
@@ -140,28 +147,21 @@ def generate_answer_node(state: QueryState, runtime: Runtime[Context]) -> QueryS
     context = truncate_text(state.get("context", ""))
     memory_texts = format_memories_for_prompt(state)
     answer_language_instruction = language_instruction(query)
-    prompt = f"""{runtime.context.system_prompt}
-
-User memories:
-{memory_texts.get("user_memories_text", "")}
-
-Session memories:
-{memory_texts.get("session_memories_text", "")}
-
-Movie context:
-{context}
-
-Question: {query}
-
-{answer_language_instruction}
-Include movie titles and relevant evidence from context.
-"""
+    prompt = build_vector_answer_prompt(
+        system_prompt=runtime.context.system_prompt,
+        user_memories_text=memory_texts.get("user_memories_text", ""),
+        session_memories_text=memory_texts.get("session_memories_text", ""),
+        movie_context=context,
+        question=query,
+        language_instruction_text=answer_language_instruction,
+    )
     try:
         llm = get_chat_model(runtime.context.model)
         response = llm.invoke([HumanMessage(content=prompt)])
         answer = sanitize_answer_for_query(str(response.content), query)
         return {**state, "answer": answer, "success": True, "reasoning": "Generated answer from vector context."}
     except Exception as exc:
+        logger.exception("Failed to generate answer")
         return {**state, "answer": f"Failed to generate answer: {exc}", "success": False, "reasoning": str(exc)}
 
 
@@ -171,22 +171,14 @@ def generate_direct_response_node(state: QueryState, runtime: Runtime[Context]) 
     query = state.get("query", "")
     memory_texts = format_memories_for_prompt(state)
     answer_language_instruction = language_instruction(query)
-    prompt = f"""{DIRECT_RESPONSE_SYSTEM_PROMPT}
-
-User memories:
-{memory_texts.get("user_memories_text", "")}
-
-Session memories:
-{memory_texts.get("session_memories_text", "")}
-
-Chat history messages:
-{_chat_history_section(state)}
-
-Question: {query}
-
-{answer_language_instruction}
-Answer naturally and briefly.
-"""
+    prompt = build_direct_response_prompt(
+        direct_system_prompt=DIRECT_RESPONSE_SYSTEM_PROMPT,
+        user_memories_text=memory_texts.get("user_memories_text", ""),
+        session_memories_text=memory_texts.get("session_memories_text", ""),
+        chat_history_text=_chat_history_section(state),
+        question=query,
+        language_instruction_text=answer_language_instruction,
+    )
     try:
         llm = get_chat_model(runtime.context.model)
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -198,4 +190,5 @@ Answer naturally and briefly.
             "reasoning": "Generated direct response without movie retrieval.",
         }
     except Exception as exc:
+        logger.exception("Failed to generate direct response")
         return {**state, "answer": f"Failed to generate direct response: {exc}", "success": False, "reasoning": str(exc)}
