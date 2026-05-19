@@ -52,6 +52,20 @@ class _FakeRouterLLM:
         return _FakeResponse(json.dumps(payload))
 
 
+class _SqlBiasedRouterLLM:
+    def bind(self, response_format):
+        return self
+
+    def invoke(self, messages):
+        payload = {
+            "tool": "sql query",
+            "query": 'SELECT "primaryTitle" FROM title_content WHERE "primaryTitle" ILIKE \'%Giorni felici%\' LIMIT 10',
+            "reasoning": "Mistakenly treated the title as a SQL filter.",
+            "confidence": 0.7,
+        }
+        return _FakeResponse(json.dumps(payload))
+
+
 def test_select_tool_prefers_sql_for_contextual_followup(monkeypatch):
     monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _FakeRouterLLM())
     state = {
@@ -86,6 +100,37 @@ def test_select_tool_can_direct_response_without_context(monkeypatch):
     result = select_tool_node(state)
     assert result["tool"] == "direct response"
     assert result["query"] == ""
+
+
+def test_select_tool_overrides_unquoted_actor_lookup_to_graph(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _SqlBiasedRouterLLM())
+
+    result = select_tool_node({"question": "who acted in Giorni felici"})
+
+    assert result["tool"] == "graph query"
+    assert "ACTED_IN" in result["query"]
+    assert "Giorni felici" in result["query"]
+    assert "Actor/cast lookup" in result["reasoning"]
+
+
+def test_select_tool_overrides_quoted_actor_lookup_to_graph(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _SqlBiasedRouterLLM())
+
+    result = select_tool_node({"question": 'who acted in "Giorni felici"'})
+
+    assert result["tool"] == "graph query"
+    assert "ACTED_IN" in result["query"]
+    assert "Giorni felici" in result["query"]
+    assert "Actor/cast lookup" in result["reasoning"]
+
+
+def test_select_tool_keeps_sql_for_movie_rating_lookup(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _SqlBiasedRouterLLM())
+
+    result = select_tool_node({"question": "rating of Giorni felici"})
+
+    assert result["tool"] == "sql query"
+    assert result["query"].startswith("SELECT")
 
 
 class _CaptureInvoke:

@@ -31,7 +31,17 @@ For vague follow-up wording, use conversation context:
 - Prefer "sql query" for prior hard-filter context (year/rating/genre/director/votes).
 - Prefer "rag" for prior semantic recommendation context.
 
-For mixed questions, prefer SQL first when there are hard filters such as year, rating, genre, director, writer, votes, or title. Vector RAG can be used later if SQL returns no results.
+For mixed questions, actor/cast/acted/starred relationship intent always wins:
+- Choose "graph query" for "who acted in X", "actors in X", "cast of X", or "who stars in X", even when X is an unquoted movie title.
+- Only prefer SQL for title filters when the user asks for movie metadata, ratings, years, genres, directors, writers, counts, or rankings without actor/cast relationship intent.
+- Examples:
+  - "who acted in Giorni felici" -> graph query
+  - "who acted in \"Giorni felici\"" -> graph query
+  - "cast of Titanic" -> graph query
+  - "actors in The Matrix" -> graph query
+  - "rating of Giorni felici" -> sql query
+  - "movies after 2020 with rating over 9" -> sql query
+Vector RAG can be used later if SQL or graph returns no results.
 
 Return only valid JSON with this schema:
 {

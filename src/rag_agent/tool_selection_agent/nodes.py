@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,6 +20,11 @@ from rag_agent.tool_selection_agent.states import ToolSelectionState
 from rag_agent.utils import strip_code_fence, time_node
 
 logger = logging.getLogger(__name__)
+
+ACTOR_CAST_LOOKUP_PATTERNS = [
+    re.compile(r'\bwho\s+(?:acted|acts|starred|stars?)\s+in\s+["\']?(.+?)["\']?\s*[?.!]?$', re.IGNORECASE),
+    re.compile(r'\b(?:actors?|cast)\s+(?:in|of|for)\s+["\']?(.+?)["\']?\s*[?.!]?$', re.IGNORECASE),
+]
 
 
 class ToolSelectionPayload(BaseModel):
@@ -53,11 +59,33 @@ def initialize_tool_selection_node(state: ToolSelectionState) -> ToolSelectionSt
 
 def _fallback_route(question: str) -> dict[str, object]:
     lowered = question.lower()
-    if any(token in lowered for token in ["actor", "acted", "co-star", "costar", "合作", "演员", "出演"]):
+    if any(token in lowered for token in ["actor", "cast", "acted", "starred", "stars", "co-star", "costar", "合作", "演员", "出演"]):
         return {"tool": "graph query", "query": "", "reasoning": "Relationship wording suggests graph retrieval.", "confidence": 0.45}
     if any(token in lowered for token in ["rating", "评分", "director", "导演", "genre", "类型", "year", "年份", "votes"]):
         return {"tool": "sql query", "query": "", "reasoning": "Structured filters suggest SQL retrieval.", "confidence": 0.45}
     return {"tool": "rag", "query": "", "reasoning": "Semantic movie search is the safest fallback.", "confidence": 0.4}
+
+
+def _actor_cast_movie_title(question: str) -> str:
+    """Extract a likely movie title from direct actor/cast lookup wording."""
+    for pattern in ACTOR_CAST_LOOKUP_PATTERNS:
+        match = pattern.search(question)
+        if not match:
+            continue
+        title = match.group(1).strip().strip("\"'")
+        lowered = title.lower()
+        if not title or lowered.startswith(("movies ", "films ")):
+            return ""
+        return title
+    return ""
+
+
+def _actor_cast_lookup_cypher(title: str) -> str:
+    title_literal = json.dumps(title)
+    return f"""MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie)
+WHERE toLower(m.primaryTitle) CONTAINS toLower({title_literal})
+RETURN a.primaryName AS actor, m.primaryTitle AS movie, r.characters AS characters, r.primaryProfession AS primaryProfession
+LIMIT 20"""
 
 
 def _fallback_with_error(question: str, exc: Exception, raw_output: str = "") -> dict[str, object]:
@@ -109,14 +137,23 @@ def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
         payload = ToolSelectionPayload.model_validate(json.loads(raw_output))
         tool = payload.tool
         query = payload.query
+        actor_cast_title = _actor_cast_movie_title(question)
+        if actor_cast_title and tool != "graph query":
+            tool = "graph query"
+            query = _actor_cast_lookup_cypher(actor_cast_title)
+            reasoning = "Actor/cast lookup must use the ACTED_IN graph relationship."
+            confidence = max(payload.confidence, 0.9)
+        else:
+            reasoning = payload.reasoning
+            confidence = payload.confidence
         if tool in {"rag", "direct response"}:
             query = ""
         return {
             **state,
             "tool": tool,
             "query": query,
-            "reasoning": payload.reasoning,
-            "confidence": payload.confidence,
+            "reasoning": reasoning,
+            "confidence": confidence,
         }
     except (json.JSONDecodeError, ValidationError) as exc:
         return {**state, **_fallback_with_error(question, exc, raw_output)}
