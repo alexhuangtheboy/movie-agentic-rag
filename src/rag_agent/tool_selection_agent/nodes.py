@@ -82,8 +82,28 @@ def _actor_cast_movie_title(question: str) -> str:
 
 def _actor_cast_lookup_cypher(title: str) -> str:
     title_literal = json.dumps(title)
+    escaped_title = re.escape(title).replace("\\ ", " ")
+    exact_regex_literal = json.dumps(f"(?i)^{escaped_title}$")
+    keywords = [
+        token
+        for token in re.findall(r"[a-z0-9]+", title.lower())
+        if token not in {"a", "an", "and", "for", "in", "of", "on", "the", "to"}
+    ]
+    keywords_literal = json.dumps(keywords)
     return f"""MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie)
-WHERE toLower(m.primaryTitle) CONTAINS toLower({title_literal})
+WITH a, r, m, toLower(coalesce(m.primaryTitle, "")) AS movieTitle, toLower({title_literal}) AS requestedTitle, {keywords_literal} AS keywords
+WITH a, r, m, movieTitle, requestedTitle, keywords,
+  CASE
+    WHEN requestedTitle STARTS WITH "the " THEN substring(requestedTitle, 4)
+    WHEN requestedTitle STARTS WITH "a " THEN substring(requestedTitle, 2)
+    WHEN requestedTitle STARTS WITH "an " THEN substring(requestedTitle, 3)
+    ELSE requestedTitle
+  END AS normalizedTitle
+WHERE m.primaryTitle =~ {exact_regex_literal}
+  OR movieTitle CONTAINS requestedTitle
+  OR requestedTitle CONTAINS movieTitle
+  OR movieTitle CONTAINS normalizedTitle
+  OR (size(keywords) > 0 AND all(keyword IN keywords WHERE movieTitle CONTAINS keyword))
 RETURN a.primaryName AS actor, m.primaryTitle AS movie, r.characters AS characters, r.primaryProfession AS primaryProfession
 LIMIT 20"""
 
@@ -138,7 +158,7 @@ def select_tool_node(state: ToolSelectionState) -> ToolSelectionState:
         tool = payload.tool
         query = payload.query
         actor_cast_title = _actor_cast_movie_title(question)
-        if actor_cast_title and tool != "graph query":
+        if actor_cast_title:
             tool = "graph query"
             query = _actor_cast_lookup_cypher(actor_cast_title)
             reasoning = "Actor/cast lookup must use the ACTED_IN graph relationship."

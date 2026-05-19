@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal
 
 from langchain_core.messages import HumanMessage
@@ -34,6 +35,11 @@ from rag_agent.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+ACTOR_CAST_LOOKUP_RE = re.compile(
+    r'\b(?:who\s+(?:acted|acts|starred|stars?)\s+in|actors?\s+(?:in|of|for)|cast\s+(?:in|of|for))\b',
+    re.IGNORECASE,
+)
 
 
 def _with_defaults(state: MovieAgentState) -> MovieAgentState:
@@ -278,6 +284,7 @@ Graph result:
 
 {answer_language_instruction}
 Explain relationships clearly and only use facts present in the graph result.
+If the graph result says no results were returned, say that no actor relationships were found in graph data for the requested title. Do not use SQL, vector, chunk, or retrieved context.
 """
     try:
         llm = get_chat_model(runtime.context.model)
@@ -327,6 +334,12 @@ def route_after_graph(state: MovieAgentState) -> Literal["refine_graph_result", 
     attempts = int(state.get("graph_refinement_attempts") or 0)
     if isinstance(answer, str) and "No results returned" in answer and attempts < 3:
         return "refine_graph_query"
+    if (
+        isinstance(answer, str)
+        and (answer.startswith("Error") or "No results returned" in answer)
+        and ACTOR_CAST_LOOKUP_RE.search(state.get("query", ""))
+    ):
+        return "refine_graph_result"
     return "rag_fallback"
 
 

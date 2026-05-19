@@ -66,6 +66,24 @@ class _SqlBiasedRouterLLM:
         return _FakeResponse(json.dumps(payload))
 
 
+class _GraphBiasedRouterLLM:
+    def bind(self, response_format):
+        return self
+
+    def invoke(self, messages):
+        payload = {
+            "tool": "graph query",
+            "query": (
+                "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie) "
+                "WHERE m.primaryTitle ILIKE 'Here We Go Again' "
+                "RETURN a.primaryName AS actor_name, m.primaryTitle AS movie_title LIMIT 20"
+            ),
+            "reasoning": "Selected graph but generated PostgreSQL-style matching.",
+            "confidence": 0.95,
+        }
+        return _FakeResponse(json.dumps(payload))
+
+
 def test_select_tool_prefers_sql_for_contextual_followup(monkeypatch):
     monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _FakeRouterLLM())
     state = {
@@ -122,6 +140,19 @@ def test_select_tool_overrides_quoted_actor_lookup_to_graph(monkeypatch):
     assert "ACTED_IN" in result["query"]
     assert "Giorni felici" in result["query"]
     assert "Actor/cast lookup" in result["reasoning"]
+
+
+def test_select_tool_replaces_invalid_graph_title_matching(monkeypatch):
+    monkeypatch.setattr("rag_agent.tool_selection_agent.nodes.get_chat_model", lambda: _GraphBiasedRouterLLM())
+
+    result = select_tool_node({"question": "who acted in Here We Go Again"})
+
+    assert result["tool"] == "graph query"
+    assert "ILIKE" not in result["query"]
+    assert "=~" in result["query"]
+    assert "(?i)^Here We Go Again$" in result["query"]
+    assert "ACTED_IN" in result["query"]
+    assert "Here We Go Again" in result["query"]
 
 
 def test_select_tool_keeps_sql_for_movie_rating_lookup(monkeypatch):
