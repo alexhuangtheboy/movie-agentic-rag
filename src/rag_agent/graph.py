@@ -400,6 +400,10 @@ movie_agent_query_builder.add_edge("format_context", "generate_answer")
 movie_agent_query_builder.add_edge("generate_answer", END)
 movie_agent_query_builder.add_edge("generate_direct_response", END)
 
+# Async event streaming requires async checkpoint methods. Keep the streaming
+# graph uncheckpointed so webhook progress can use astream_events safely.
+movie_agent_query_stream_graph = movie_agent_query_builder.compile(name="movie_agent_query_stream")
+
 try:
     checkpointer_cm = PostgresSaver.from_conn_string(get_checkpoint_database_url())
     checkpointer = checkpointer_cm.__enter__() if hasattr(checkpointer_cm, "__enter__") else checkpointer_cm
@@ -412,4 +416,4 @@ except Exception:
     logger.exception("PostgresSaver unavailable, compiling without checkpointing")
     movie_agent_query_graph = movie_agent_query_builder.compile(name="movie_agent_query")
 
-__all__ = ["movie_agent_query_graph"]
+__all__ = ["movie_agent_query_graph", "movie_agent_query_stream_graph"]

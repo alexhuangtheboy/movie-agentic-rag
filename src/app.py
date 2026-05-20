@@ -38,7 +38,7 @@ from rag_agent.database.connections import (
     get_movie_sql_database_url,
     get_movie_vector_database_url,
 )
-from rag_agent.graph import movie_agent_query_graph
+from rag_agent.graph import movie_agent_query_graph, movie_agent_query_stream_graph
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -446,7 +446,7 @@ async def movie_query(request: QueryRequest = Body(...)) -> QueryResponse:
 
         try:
             async with asyncio.timeout(_graph_timeout_seconds()):
-                async for event in movie_agent_query_graph.astream_events(
+                async for event in movie_agent_query_stream_graph.astream_events(
                     initial_state,
                     config=config,
                     context=context,
