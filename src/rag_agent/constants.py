@@ -22,7 +22,12 @@ MOVIE_SQL_TABLES = [
 
 MOVIE_GRAPH_SCHEMAS = ["movie_graph"]
 
-FINAL_ANSWER_NODES = {"generate_answer", "refine_sql_result", "refine_graph_result"}
+FINAL_ANSWER_NODES = {
+    "generate_answer",
+    "generate_direct_response",
+    "refine_sql_result",
+    "refine_graph_result",
+}
 
 
 def _normalized_base_url(value: str) -> str:

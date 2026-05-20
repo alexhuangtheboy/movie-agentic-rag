@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from rag_agent.constants import FINAL_ANSWER_NODES
 from rag_agent.context.base import Context
 from rag_agent.movie_agent.nodes import generate_direct_response_node
 
@@ -49,3 +50,7 @@ def test_generate_direct_response_ignores_movie_context(monkeypatch):
     assert "movie[1].movieId: tt0033943" not in prompt
     assert "Detailed chunks" not in prompt
     assert "Movie context:" not in prompt
+
+
+def test_generate_direct_response_is_final_answer_node():
+    assert "generate_direct_response" in FINAL_ANSWER_NODES
